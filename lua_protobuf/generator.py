@@ -131,7 +131,7 @@ def c_header_header(filename, package):
         '#define LUA_PROTOBUF_%s_H' % package.replace('.', '_'),
         '',
         '#include "lua-protobuf.h"',
-        '#include <%s.pb.h>' % package.replace('.', '/'),
+        '#include "%s.pb.h"' % package.replace('.', '/'),
         '',
         '#ifdef __cplusplus',
         'extern "C" {',
@@ -281,7 +281,7 @@ def add_body(package, message, field, type_name):
 def field_get(package, message, field_descriptor):
     '''Returns function definition for a get_<field> function'''
 
-    name = field_descriptor.name
+    name = field_descriptor.name.lower()
     type = field_descriptor.type
     type_name = field_descriptor.type_name
     label = field_descriptor.label
@@ -349,24 +349,24 @@ def field_get(package, message, field_descriptor):
         # this is the Lua way
         if type == FieldDescriptor.TYPE_STRING or type == FieldDescriptor.TYPE_BYTES:
             lines.append('string s = m->%s();' % name)
-            lines.append('m->has_%s() ? lua_pushlstring(L, s.c_str(), s.size()) : lua_pushnil(L);' % name)
+            lines.append('m->has_%s() ? (void)lua_pushlstring(L, s.c_str(), s.size()) : lua_pushnil(L);' % name)
 
         elif type == FieldDescriptor.TYPE_BOOL:
-            lines.append('m->has_%s() ? lua_pushboolean(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
+            lines.append('m->has_%s() ? (void)lua_pushboolean(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
 
         elif type in [FieldDescriptor.TYPE_INT32, FieldDescriptor.TYPE_UINT32,
             FieldDescriptor.TYPE_FIXED32, FieldDescriptor.TYPE_SFIXED32, FieldDescriptor.TYPE_SINT32]:
-            lines.append('m->has_%s() ? lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
+            lines.append('m->has_%s() ? (void)lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
 
         elif type in [ FieldDescriptor.TYPE_INT64, FieldDescriptor.TYPE_UINT64,
             FieldDescriptor.TYPE_FIXED64, FieldDescriptor.TYPE_SFIXED64, FieldDescriptor.TYPE_SINT64]:
-            lines.append('m->has_%s() ? lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
+            lines.append('m->has_%s() ? (void)lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
 
         elif type == FieldDescriptor.TYPE_FLOAT or type == FieldDescriptor.TYPE_DOUBLE:
-            lines.append('m->has_%s() ? lua_pushnumber(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
+            lines.append('m->has_%s() ? (void)lua_pushnumber(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
 
         elif type == FieldDescriptor.TYPE_ENUM:
-            lines.append('m->has_%s() ? lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
+            lines.append('m->has_%s() ? (void)lua_pushinteger(L, m->%s()) : lua_pushnil(L);' % ( name, name ))
 
         elif type == FieldDescriptor.TYPE_MESSAGE:
             lines.extend([
@@ -403,7 +403,7 @@ def field_set_assignment(field, args):
 def field_set(package, message, field_descriptor):
     '''Returns function definition for a set_<field> function'''
 
-    name = field_descriptor.name
+    name = field_descriptor.name.lower()
     type = field_descriptor.type
     type_name = field_descriptor.type_name
     label = field_descriptor.label
@@ -735,7 +735,7 @@ def message_method_array(package, descriptor):
     lines.append('{"__gc", %sgc},' % message_function_prefix(package, message))
 
     for fd in descriptor.field:
-        name = fd.name
+        name = fd.name.lower()
         label = fd.label
         type = fd.type
 
@@ -838,7 +838,7 @@ def message_header(package, message_descriptor):
 
     # each field defined in the message
     for field_descriptor in message_descriptor.field:
-        field_name = field_descriptor.name
+        field_name = field_descriptor.name.lower()
         field_number = field_descriptor.number
         field_label = field_descriptor.label
         field_type = field_descriptor.type
@@ -895,7 +895,7 @@ def message_source(package, message_descriptor):
     lines.extend(serialized_message_function(package, message))
 
     for descriptor in message_descriptor.field:
-        name = descriptor.name
+        name = descriptor.name.lower()
 
         # clear() is in all label types
         lines.extend(field_function_start(package, message, 'clear', name))
@@ -1018,7 +1018,41 @@ def file_source(file_descriptor):
     lines = []
     lines.extend(source_header(filename, package))
     lines.append('using ::std::string;\n')
+    lines.append('''
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
+static const char *luaL_findtable (lua_State *L, int idx,
+                                   const char *fname, int szhint) {
+  const char *e;
+  if (idx) lua_pushvalue(L, idx);
+  do {
+    e = strchr(fname, '.');
+    if (e == NULL) e = fname + strlen(fname);
+    lua_pushlstring(L, fname, e - fname);
+    lua_rawget(L, -2);
+    if (lua_isnil(L, -1)) {  /* no such field? */
+      lua_pop(L, 1);  /* remove this nil */
+      lua_createtable(L, 0, (*e == '.' ? 1 : szhint)); /* new table for field */
+      lua_pushlstring(L, fname, e - fname);
+      lua_pushvalue(L, -2);
+      lua_settable(L, -4);  /* set new table into field */
+    }
+    else if (!lua_istable(L, -1)) {  /* field has a non-table value? */
+      lua_pop(L, 2);  /* remove table and value */
+      return fname;  /* return problematic part of the name */
+    }
+    lua_remove(L, -2);  /* remove previous table */
+    fname = e + 1;
+  } while (*e == '.');
+  return NULL;
+}
+#endif''')
 
+    lines.append('''
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 501
+extern "C" int luaopen_lib%s (lua_State* tolua_S) {
+ return %sopen(tolua_S);
+};
+#endif'''%(package.replace('.', '_'), package_function_prefix(package)))
     lines.extend([
         'int %sopen(lua_State *L)' % package_function_prefix(package),
         '{',
@@ -1035,7 +1069,12 @@ def file_source(file_descriptor):
     # we probably shouldn't rely on an "internal" API, so
     # TODO don't use internal API call
     lines.extend([
-        'const char *table = luaL_findtable(L, LUA_GLOBALSINDEX, "protobuf.%s", 1);' % package,
+        '#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502',
+        'lua_pushglobaltable(L);',
+        'const char *table = luaL_findtable(L, 0, "protobuf.%s", 1);' % package,
+        '#else',
+        'const char *table = luaL_findtable(L, LUA_GLOBALSINDEX, "protobuf.user", 1);',
+        '#endif',
         'if (table) {',
             'return luaL_error(L, "could not create parent Lua tables");',
         '}',
