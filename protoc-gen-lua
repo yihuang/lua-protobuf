@@ -56,6 +56,11 @@ for i in range(0, len(request.proto_file)):
     f.name = '%s.pb-lua.cc' % basename
     f.content = file_source(file_descriptor)
 
+    if file_descriptor.service:
+        f = response.file.add()
+        f.name = '%s_service.lua' % basename
+        f.content = file_service(file_descriptor)
+
 f = response.file.add()
 f.name = 'lua-protobuf.h'
 f.content = lua_protobuf_header()

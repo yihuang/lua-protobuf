@@ -1125,3 +1125,36 @@ extern "C" int luaopen_lib%s (lua_State* tolua_S) {
 
     return '\n'.join(formatted)
 
+def py2lua(o):
+    if isinstance(o, list):
+        return '{\n'+',\n'.join(map(py2lua, o))+'\n}'
+    elif isinstance(o, dict):
+        return '{\n'+',\n'.join(map(lambda (k,v):str(k)+'='+py2lua(v), o.items()))+'\n}'
+    elif isinstance(o, unicode):
+        return o.encode('utf-8')
+    elif isinstance(o, str):
+        return o
+    else:
+        return str(o)
+
+def file_service(file_descriptor):
+    services = []
+    for index, service in enumerate(file_descriptor.service):
+        methods = []
+        for method in service.method:
+            methods.append(
+              { 'name': '"'+method.name+'"'
+              , 'index': index
+              , 'input': 'protobuf'+method.input_type
+              , 'output': 'protobuf'+method.output_type
+              }
+            )
+        services.append(
+          { 'name': '"'+service.name+'"'
+          , 'index': index
+          , 'methods': methods
+          }
+        )
+    name = '%s_service'%file_descriptor.package.replace('.', '_')
+
+    return name+'='+py2lua(services)
