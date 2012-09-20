@@ -27,7 +27,8 @@
 # Yes, it is currently written in Python. That's how bootstrapping works,
 # people.
 
-from lua_protobuf.generator import file_source, file_header, lua_protobuf_header, lua_protobuf_source
+import os
+from lua_protobuf.generator import file_source, file_header, file_service, lua_protobuf_header, lua_protobuf_source
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.compiler.plugin_pb2 import CodeGeneratorRequest, CodeGeneratorResponse
 from sys import stdin, stdout, stderr
@@ -41,25 +42,18 @@ response = CodeGeneratorResponse()
 # each input file to the compiler
 for i in range(0, len(request.proto_file)):
     file_descriptor = request.proto_file[i]
-    filename = file_descriptor.name
     package = file_descriptor.package
+    basename = package.replace('.', '/') if package else os.path.basename(file_descriptor.name)
 
-    # for now, we require package, which is bad
-    # TODO fix this
-    if not package:
-        response.error = 'file seen without package. lua-protobuf currently requires a package on every proto file: %s' % filename
-        break
-
-    define_value = package.replace('.', '_').upper()
-    cpp_header = '%s.pb.h' % package.replace('.', '/')
-    cpp_namespace = '::%s' % package.replace('.', '::')
+    cpp_header = '%s.pb.h' % basename
+    cpp_namespace = '::%s' % package.replace('.', '::') if package else ''
 
     f = response.file.add()
-    f.name = '%s.pb-lua.h' % package.replace('.', '/')
+    f.name = '%s.pb-lua.h' % basename
     f.content = file_header(file_descriptor)
 
     f = response.file.add()
-    f.name = '%s.pb-lua.cc' % package.replace('.', '/')
+    f.name = '%s.pb-lua.cc' % basename
     f.content = file_source(file_descriptor)
 
 f = response.file.add()
