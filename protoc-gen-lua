@@ -42,11 +42,13 @@ response = CodeGeneratorResponse()
 # each input file to the compiler
 for i in range(0, len(request.proto_file)):
     file_descriptor = request.proto_file[i]
-    package = file_descriptor.package
-    basename = package.replace('.', '/') if package else os.path.basename(file_descriptor.name)
+    basename = os.path.splitext(file_descriptor.name)[0]
 
-    cpp_header = '%s.pb.h' % basename
-    cpp_namespace = '::%s' % package.replace('.', '::') if package else ''
+    # for now, we require package, which is bad
+    # TODO fix this
+    if not file_descriptor.package:
+        response.error = 'file seen without package. lua-protobuf currently requires a package on every proto file: %s' % file_descriptor.name
+        break
 
     f = response.file.add()
     f.name = '%s.pb-lua.h' % basename
